@@ -1,176 +1,116 @@
-// frontend/public/wind-particles.worker.js
-// Web Worker for particle simulation to keep UI thread free
+// Web Worker for particle simulation using smoothed grid
 
 let particles = [];
-let windField = [];
+let windField = null;
 let bounds = null;
 let particleCount = 3000;
 
-// Initialize particles
 function initializeParticles(count) {
-  particles = [];
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      x: Math.random(),
-      y: Math.random(),
-      age: Math.random() * 100,
-      maxAge: 100,
-      vx: 0,
-      vy: 0
-    });
-  }
+  particles = Array.from({ length: count }, () => ({
+    x: Math.random(),
+    y: Math.random(),
+    age: Math.random() * 100,
+    maxAge: 100,
+    vx: 0,
+    vy: 0
+  }));
   return particles;
 }
 
-// Get wind at specific point using interpolation
+// Bilinear interpolation function
 function getWindAtPoint(x, y) {
-  if (!windField || windField.length === 0) {
-    // Default wind
-    return { u: Math.random() * 2 - 1, v: Math.random() * 2 - 1 };
-  }
+  if (!windField || !windField.grid || !bounds) return { u: 0, v: 0 };
 
-  // Convert normalized coordinates to lat/lng
   const lng = bounds.west + x * (bounds.east - bounds.west);
   const lat = bounds.south + y * (bounds.north - bounds.south);
 
-  // Find nearest wind vector
-  let nearest = windField[0];
-  let minDist = Infinity;
+  const { grid, gridSize } = windField;
+  const minLat = bounds.south;
+  const maxLat = bounds.north;
+  const minLng = bounds.west;
+  const maxLng = bounds.east;
 
-  for (const vector of windField) {
-    const dist = Math.sqrt(
-      Math.pow(vector.lat - lat, 2) + Math.pow(vector.lng - lng, 2)
-    );
-    if (dist < minDist) {
-      minDist = dist;
-      nearest = vector;
-    }
-  }
+  const xi = ((lng - minLng) / (maxLng - minLng)) * gridSize;
+  const yi = ((lat - minLat) / (maxLat - minLat)) * gridSize;
 
-  return { u: nearest.u || 0, v: nearest.v || 0 };
-}
+  const x0 = Math.floor(xi);
+  const y0 = Math.floor(yi);
+  const x1 = Math.min(x0 + 1, gridSize);
+  const y1 = Math.min(y0 + 1, gridSize);
 
-// Update particles
-function updateParticles(deltaTime) {
-  const speedFactor = 0.002 * (deltaTime / 16); // Normalize to 60fps
+  const dx = xi - x0;
+  const dy = yi - y0;
 
-  for (let i = 0; i < particles.length; i++) {
-    const particle = particles[i];
+  const v00 = grid[y0][x0];
+  const v10 = grid[y0][x1];
+  const v01 = grid[y1][x0];
+  const v11 = grid[y1][x1];
 
-    // Get wind at current position
-    const wind = getWindAtPoint(particle.x, particle.y);
+  const u = v00.u * (1 - dx) * (1 - dy) +
+            v10.u * dx * (1 - dy) +
+            v01.u * (1 - dx) * dy +
+            v11.u * dx * dy;
 
-    // Update velocity
-    particle.vx = wind.u * speedFactor;
-    particle.vy = -wind.v * speedFactor; // Invert y for canvas coords
-
-    // Update position
-    particle.x += particle.vx;
-    particle.y += particle.vy;
-
-    // Age particle
-    particle.age += deltaTime / 16;
-
-    // Reset if old or out of bounds
-    if (
-      particle.age > particle.maxAge ||
-      particle.x < 0 ||
-      particle.x > 1 ||
-      particle.y < 0 ||
-      particle.y > 1
-    ) {
-      particle.x = Math.random();
-      particle.y = Math.random();
-      particle.age = 0;
-    }
-  }
-
-  return particles;
-}
-
-// Bilinear interpolation for smoother wind field
-function interpolateWind(x, y) {
-  if (!windField || windField.length === 0) {
-    return { u: 0, v: 0 };
-  }
-
-  // Find 4 surrounding points
-  const lng = bounds.west + x * (bounds.east - bounds.west);
-  const lat = bounds.south + y * (bounds.north - bounds.south);
-
-  // Get nearest 4 vectors
-  const nearest = windField
-    .map(v => ({
-      ...v,
-      dist: Math.sqrt(Math.pow(v.lat - lat, 2) + Math.pow(v.lng - lng, 2))
-    }))
-    .sort((a, b) => a.dist - b.dist)
-    .slice(0, 4);
-
-  if (nearest.length === 0) return { u: 0, v: 0 };
-  if (nearest[0].dist < 0.001) return { u: nearest[0].u, v: nearest[0].v };
-
-  // Inverse distance weighting
-  const totalWeight = nearest.reduce((sum, p) => sum + 1 / (p.dist + 0.001), 0);
-  let u = 0,
-    v = 0;
-
-  for (const point of nearest) {
-    const weight = 1 / (point.dist + 0.001) / totalWeight;
-    u += point.u * weight;
-    v += point.v * weight;
-  }
+  const v = v00.v * (1 - dx) * (1 - dy) +
+            v10.v * dx * (1 - dy) +
+            v01.v * (1 - dx) * dy +
+            v11.v * dx * dy;
 
   return { u, v };
 }
 
-// Message handler
-self.onmessage = function (e) {
+function updateParticles(deltaTime) {
+  const speedFactor = 0.002 * (deltaTime / 16);
+
+  for (let p of particles) {
+    const wind = getWindAtPoint(p.x, p.y);
+    p.vx = wind.u * speedFactor;
+    p.vy = -wind.v * speedFactor;
+
+    p.x += p.vx;
+    p.y += p.vy;
+    p.age += deltaTime / 16;
+
+    if (p.age > p.maxAge || p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1) {
+      p.x = Math.random();
+      p.y = Math.random();
+      p.age = 0;
+    }
+  }
+
+  return particles;
+}
+
+self.onmessage = function(e) {
   const { type, data } = e.data;
 
-  switch (type) {
+  switch(type) {
     case 'init':
       particleCount = data.particleCount || 3000;
-      const initialParticles = initializeParticles(particleCount);
-      self.postMessage({
-        type: 'initialized',
-        particles: initialParticles
-      });
+      self.postMessage({ type: 'initialized', particles: initializeParticles(particleCount) });
       break;
 
     case 'setWindField':
-      windField = data.windField || [];
-      bounds = data.bounds || null;
+      windField = data.windField;
+      bounds = data.bounds;
       self.postMessage({ type: 'windFieldSet' });
       break;
 
     case 'update':
       const deltaTime = data.deltaTime || 16;
-      const updatedParticles = updateParticles(deltaTime);
-      self.postMessage({
-        type: 'updated',
-        particles: updatedParticles
-      });
+      self.postMessage({ type: 'updated', particles: updateParticles(deltaTime) });
       break;
 
     case 'reset':
-      const resetParticles = initializeParticles(particleCount);
-      self.postMessage({
-        type: 'reset',
-        particles: resetParticles
-      });
+      self.postMessage({ type: 'reset', particles: initializeParticles(particleCount) });
       break;
 
     case 'setParticleCount':
       particleCount = data.count;
-      const newParticles = initializeParticles(particleCount);
-      self.postMessage({
-        type: 'particleCountSet',
-        particles: newParticles
-      });
+      self.postMessage({ type: 'particleCountSet', particles: initializeParticles(particleCount) });
       break;
 
     default:
-      console.warn('Unknown message type:', type);
+      console.warn('Unknown worker message type:', type);
   }
 };
