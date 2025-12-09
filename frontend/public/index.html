@@ -1,0 +1,157 @@
+<!-- frontend/public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <meta
+      name="description"
+      content="Real-time weather visualization with dynamic heatmaps and animated wind particles. View precipitation, temperature, wind speed, cloud cover, and storm intensity across multiple countries."
+    />
+    <meta name="keywords" content="weather, heatmap, visualization, wind, temperature, precipitation, real-time" />
+    <meta name="author" content="Weather Heatmap App" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://your-domain.com/" />
+    <meta property="og:title" content="Weather Heatmap - Dynamic Visualization" />
+    <meta property="og:description" content="Real-time weather visualization with animated heatmaps" />
+    <meta property="og:image" content="%PUBLIC_URL%/preview.png" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://your-domain.com/" />
+    <meta property="twitter:title" content="Weather Heatmap - Dynamic Visualization" />
+    <meta property="twitter:description" content="Real-time weather visualization with animated heatmaps" />
+    <meta property="twitter:image" content="%PUBLIC_URL%/preview.png" />
+
+    <!-- Apple Touch Icon -->
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    
+    <!-- Manifest -->
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    
+    <!-- MapLibre GL CSS -->
+    <link 
+      href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" 
+      rel="stylesheet" 
+    />
+    
+    <!-- Preconnect to external resources -->
+    <link rel="preconnect" href="https://api.tomorrow.io" />
+    <link rel="preconnect" href="https://a.tile.openstreetmap.org" />
+    <link rel="preconnect" href="https://b.tile.openstreetmap.org" />
+    <link rel="preconnect" href="https://c.tile.openstreetmap.org" />
+    
+    <title>Weather Heatmap - Dynamic Visualization</title>
+    
+    <style>
+      /* Prevent flash of unstyled content */
+      body {
+        margin: 0;
+        background-color: #111827;
+        color: white;
+      }
+      
+      /* Loading screen */
+      #loading-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #111827;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+      
+      #loading-screen.hidden {
+        display: none;
+      }
+      
+      .spinner {
+        width: 50px;
+        height: 50px;
+        border: 4px solid rgba(59, 130, 246, 0.3);
+        border-top-color: #3b82f6;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        margin-top: 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: #9ca3af;
+        font-size: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      <div style="padding: 20px; text-align: center; background: #111827; color: white;">
+        <h1>JavaScript Required</h1>
+        <p>You need to enable JavaScript to run this weather visualization app.</p>
+      </div>
+    </noscript>
+    
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+      <div class="spinner"></div>
+      <div class="loading-text">Loading Weather Heatmap...</div>
+    </div>
+    
+    <!-- React Root -->
+    <div id="root"></div>
+    
+    <!-- Hide loading screen when React app loads -->
+    <script>
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          const loadingScreen = document.getElementById('loading-screen');
+          if (loadingScreen) {
+            loadingScreen.classList.add('hidden');
+          }
+        }, 500);
+      });
+      
+      // Check for WebGL support
+      function checkWebGLSupport() {
+        try {
+          const canvas = document.createElement('canvas');
+          return !!(
+            window.WebGLRenderingContext &&
+            (canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))
+          );
+        } catch (e) {
+          return false;
+        }
+      }
+      
+      if (!checkWebGLSupport()) {
+        console.warn('WebGL is not supported. Wind particle animations may not work properly.');
+      }
+      
+      // Service Worker Registration (optional)
+      if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then(function(registration) {
+              console.log('ServiceWorker registered:', registration.scope);
+            })
+            .catch(function(error) {
+              console.log('ServiceWorker registration failed:', error);
+            });
+        });
+      }
+    </script>
+  </body>
+</html>
