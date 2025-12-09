@@ -1,3 +1,4 @@
+// backend/src/controllers/tileController.js
 import { generateTile } from '../services/tileGenerator.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -8,7 +9,7 @@ export const getTile = async (req, res) => {
     const { layer, z, x, y } = req.params;
     const zoom = parseInt(z);
     const tileX = parseInt(x);
-    const tileY = parseInt(y);
+    const tileY = parseInt(y.replace('.json', '').replace('.png', '')); // Handle both formats
     
     // Validate parameters
     if (zoom < TILE_CONFIG.minZoom || zoom > TILE_CONFIG.maxZoom) {
@@ -21,13 +22,14 @@ export const getTile = async (req, res) => {
       layer,
       `${zoom}`,
       `${tileX}`,
-      `${tileY}.png`
+      `${tileY}.json`
     );
     
     try {
       const tileData = await fs.readFile(tilePath);
-      res.set('Content-Type', 'image/png');
-      res.set('Cache-Control', 'public, max-age=300'); // Cache for 5 minutes
+      res.set('Content-Type', 'application/json');
+      res.set('Cache-Control', 'public, max-age=300');
+      res.set('Access-Control-Allow-Origin', '*');
       return res.send(tileData);
     } catch (err) {
       // Tile not in cache, generate it
@@ -38,13 +40,14 @@ export const getTile = async (req, res) => {
       await fs.mkdir(path.dirname(tilePath), { recursive: true });
       await fs.writeFile(tilePath, tile);
       
-      res.set('Content-Type', 'image/png');
+      res.set('Content-Type', 'application/json');
       res.set('Cache-Control', 'public, max-age=300');
+      res.set('Access-Control-Allow-Origin', '*');
       return res.send(tile);
     }
   } catch (error) {
     console.error('Error serving tile:', error);
-    res.status(500).json({ error: 'Failed to generate tile' });
+    res.status(500).json({ error: 'Failed to generate tile', message: error.message });
   }
 };
 
@@ -56,7 +59,7 @@ export const getTileMetadata = async (req, res) => {
     tileSize: TILE_CONFIG.size,
     minZoom: TILE_CONFIG.minZoom,
     maxZoom: TILE_CONFIG.maxZoom,
-    format: 'png',
+    format: 'json',
     scheme: 'xyz'
   });
 };

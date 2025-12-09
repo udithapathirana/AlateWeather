@@ -1,12 +1,11 @@
-// frontend/src/App.jsx
 import React, { useState, useEffect } from 'react';
 import MapContainer from './components/Map/MapContainer';
 import CountrySelector from './components/Sidebar/CountrySelector';
 import LayerControls from './components/Sidebar/LayerControls';
 import TimelineSlider from './components/Sidebar/TimelineSlider';
 import Legend from './components/Sidebar/Legend';
-import LoadingSpinner from './components/UI/LoadingSpinner';
-import ErrorMessage from './components/UI/ErrorMessage';
+import { LoadingSpinner } from './components/UI/LoadingSpinner';
+import { ErrorMessage } from './components/UI/ErrorMessage';
 import useWeatherData from './hooks/useWeatherData';
 import websocketService from './services/websocket';
 import { Cloud } from 'lucide-react';

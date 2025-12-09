@@ -1,21 +1,22 @@
 {
   "name": "weather-heatmap-backend",
   "version": "1.0.0",
+  "description": "Backend API for weather heatmap visualization",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js"
   },
+  "keywords": ["weather", "heatmap", "api"],
+  "author": "Your Name",
+  "license": "MIT",
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "axios": "^1.6.0",
     "node-cache": "^5.1.2",
-    "sharp": "^0.33.0",
-    "canvas": "^2.11.2",
-    "@mapbox/sphericalmercator": "^1.2.0",
     "socket.io": "^4.6.0"
   },
   "devDependencies": {
