@@ -225,14 +225,13 @@ const WindParticleLayer = ({ map, country }) => {
         p.age = 0;
       }
 
-     const px = p.x * width;
-const py = p.y * height;
+      const px = p.x * width;
+      const py = p.y * height;
 
-ctx.beginPath();
-ctx.arc(px, py, 0.7, 0, Math.PI * 2);
-// dimmer white so map shows below
-ctx.fillStyle = "rgba(255,255,255,0.3)";
-ctx.fill();
+      ctx.beginPath();
+      ctx.arc(px, py, 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      ctx.fill();
     });
 
     animationRef.current = requestAnimationFrame(animate);
