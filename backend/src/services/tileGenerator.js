@@ -1,8 +1,6 @@
 // backend/src/services/tileGenerator.js
-// Simplified version without canvas/sharp dependencies
-
 import { TILE_CONFIG } from '../config/tileConfig.js';
-import { fetchWeatherForTile } from './weatherService.js';
+import weatherService from './weatherService.js';
 import { interpolateColor } from '../utils/colorMapper.js';
 
 // Simple tile generation without canvas
@@ -20,8 +18,14 @@ export const generateTile = async (layer, zoom, x, y) => {
     
     const bbox = { west, south, east, north };
     
-    // Fetch weather data for this tile
-    const weatherData = await fetchWeatherForTile(layer, bbox, zoom);
+    // Fetch weather data for this tile from global data
+    const globalData = await weatherService.fetchGlobalWeatherData(layer);
+    
+    // Filter to tile bounds
+    const weatherData = globalData.filter(point => 
+      point.lat >= south && point.lat <= north &&
+      point.lng >= west && point.lng <= east
+    );
     
     // Generate JSON tile data (frontend will render)
     const tileData = {

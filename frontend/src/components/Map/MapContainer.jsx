@@ -24,9 +24,9 @@ const MapContainer = ({
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-      center: country ? country.center : [0, 0],
-      zoom: 5,
-      minZoom: 2,
+      center: [0, 20], // Global center
+      zoom: 2,
+      minZoom: 1,
       maxZoom: 12
     });
 
@@ -50,7 +50,7 @@ const MapContainer = ({
     };
   }, []);
 
-  // Update map center when country changes
+  // Navigate to country (don't reload data)
   useEffect(() => {
     if (map.current && country) {
       map.current.flyTo({
@@ -61,22 +61,17 @@ const MapContainer = ({
     }
   }, [country]);
 
-  // Update weather layers
+  // Load GLOBAL weather layers once from REAL API
   useEffect(() => {
-    if (!map.current || !mapLoaded || !country) return;
+    if (!map.current || !mapLoaded) return;
 
-    console.log('Updating weather layers...');
+    console.log('Loading global weather layers from API...');
 
-    // Remove ALL previous layers and sources
+    // Remove previous layers
     layerIds.current.forEach((sourceId) => {
-      const heatmapId = `${sourceId}-heatmap`;
-      const circleId = `${sourceId}-circle`;
-      
-      if (map.current.getLayer(heatmapId)) {
-        map.current.removeLayer(heatmapId);
-      }
-      if (map.current.getLayer(circleId)) {
-        map.current.removeLayer(circleId);
+      const layerId = `${sourceId}-layer`;
+      if (map.current.getLayer(layerId)) {
+        map.current.removeLayer(layerId);
       }
       if (map.current.getSource(sourceId)) {
         map.current.removeSource(sourceId);
@@ -90,226 +85,238 @@ const MapContainer = ({
       return;
     }
 
-    activeLayers.forEach(([layerName]) => {
-      let layerData = weatherData?.layers?.[layerName];
-      
-      // Generate data with natural distribution
-      if (!layerData || layerData.length < 50) {
-        console.warn(`Generating natural distribution for ${layerName}`);
-        layerData = generateNaturalWeatherData(country.bounds, layerName);
-      }
-
+    // Fetch REAL data for each active layer
+    activeLayers.forEach(async ([layerName]) => {
       const sourceId = `weather-${layerName}`;
-      console.log(`Creating ${layerName} with ${layerData.length} points`);
+      console.log(`Fetching REAL ${layerName} data from API...`);
 
-      const features = layerData.map((point) => ({
-        type: "Feature",
-        geometry: {
-          type: "Point",
-          coordinates: [point.lng, point.lat]
-        },
-        properties: {
-          value: point.value || 50,
-          normalizedValue: normalizeValue(point.value || 50, layerName)
+      try {
+        // Import the API service
+        const { weatherAPI } = await import('../../services/api');
+        
+        // Fetch real global data
+        const response = await weatherAPI.getGlobalWeatherLayer(layerName);
+        const globalData = response.data;
+
+        console.log(`✓ Received ${globalData.length} real data points for ${layerName}`);
+
+        const features = globalData.map((point) => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [point.lng, point.lat]
+          },
+          properties: {
+            value: point.value,
+            normalizedValue: normalizeValue(point.value, layerName)
+          }
+        }));
+
+        const geojson = {
+          type: "FeatureCollection",
+          features
+        };
+
+        // Add source
+        if (map.current.getSource(sourceId)) {
+          map.current.getSource(sourceId).setData(geojson);
+        } else {
+          map.current.addSource(sourceId, {
+            type: "geojson",
+            data: geojson
+          });
+
+          // Add layer with blurred circles (heatmap effect)
+          const layerId = `${sourceId}-layer`;
+          map.current.addLayer({
+            id: layerId,
+            type: "circle",
+            source: sourceId,
+            paint: {
+              "circle-radius": [
+                "interpolate",
+                ["exponential", 2],
+                ["zoom"],
+                1, 15,
+                3, 25,
+                5, 35,
+                7, 45,
+                10, 60
+              ],
+              "circle-color": [
+                "interpolate",
+                ["linear"],
+                ["get", "normalizedValue"],
+                0, getColorAtValue(layerName, 0),
+                0.2, getColorAtValue(layerName, 0.2),
+                0.4, getColorAtValue(layerName, 0.4),
+                0.6, getColorAtValue(layerName, 0.6),
+                0.8, getColorAtValue(layerName, 0.8),
+                1, getColorAtValue(layerName, 1)
+              ],
+              "circle-opacity": 0.35,
+              "circle-blur": 1.0
+            }
+          });
+          
+          layerIds.current.push(sourceId);
         }
-      }));
 
-      const geojson = {
-        type: "FeatureCollection",
-        features
-      };
+        console.log(`✓ Rendered REAL ${layerName} layer on map`);
 
-      // Add source
-      map.current.addSource(sourceId, {
-        type: "geojson",
-        data: geojson
-      });
+      } catch (error) {
+        console.error(`Failed to fetch ${layerName}:`, error);
+        // Fallback to procedural if API fails
+        console.warn(`Using fallback data for ${layerName}`);
+        const fallbackData = generateGlobalWeatherData(layerName);
+        
+        const features = fallbackData.map((point) => ({
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [point.lng, point.lat]
+          },
+          properties: {
+            value: point.value,
+            normalizedValue: normalizeValue(point.value, layerName)
+          }
+        }));
 
-      // Add heatmap layer with VALUE-BASED colors (zoom-stable)
-      const heatmapId = `${sourceId}-heatmap`;
-      map.current.addLayer({
-        id: heatmapId,
-        type: "circle",
-        source: sourceId,
-        maxzoom: 10,
-        paint: {
-          // Create heatmap effect with large, blurred circles
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            0, 35,
-            3, 45,
-            5, 55,
-            7, 65,
-            10, 80
-          ],
-          // Color based on actual data value - STAYS CONSISTENT
-          "circle-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "normalizedValue"],
-            0, getCircleColorAtValue(layerName, 0),
-            0.2, getCircleColorAtValue(layerName, 0.2),
-            0.4, getCircleColorAtValue(layerName, 0.4),
-            0.6, getCircleColorAtValue(layerName, 0.6),
-            0.8, getCircleColorAtValue(layerName, 0.8),
-            1, getCircleColorAtValue(layerName, 1)
-          ],
-          "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            0, 0.4,
-            5, 0.45,
-            8, 0.35,
-            10, 0
-          ],
-          // Heavy blur creates smooth heatmap effect
-          "circle-blur": 1.0
+        const geojson = {
+          type: "FeatureCollection",
+          features
+        };
+
+        if (!map.current.getSource(sourceId)) {
+          map.current.addSource(sourceId, {
+            type: "geojson",
+            data: geojson
+          });
+
+          const layerId = `${sourceId}-layer`;
+          map.current.addLayer({
+            id: layerId,
+            type: "circle",
+            source: sourceId,
+            paint: {
+              "circle-radius": [
+                "interpolate",
+                ["exponential", 2],
+                ["zoom"],
+                1, 15,
+                3, 25,
+                5, 35,
+                7, 45,
+                10, 60
+              ],
+              "circle-color": [
+                "interpolate",
+                ["linear"],
+                ["get", "normalizedValue"],
+                0, getColorAtValue(layerName, 0),
+                0.2, getColorAtValue(layerName, 0.2),
+                0.4, getColorAtValue(layerName, 0.4),
+                0.6, getColorAtValue(layerName, 0.6),
+                0.8, getColorAtValue(layerName, 0.8),
+                1, getColorAtValue(layerName, 1)
+              ],
+              "circle-opacity": 0.35,
+              "circle-blur": 1.0
+            }
+          });
+          
+          layerIds.current.push(sourceId);
         }
-      });
-
-      // Add circle layer for detail
-      const circleId = `${sourceId}-circle`;
-      map.current.addLayer({
-        id: circleId,
-        type: "circle",
-        source: sourceId,
-        minzoom: 8,
-        paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            8, 5,
-            10, 10,
-            12, 16
-          ],
-          "circle-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "normalizedValue"],
-            0, getCircleColorAtValue(layerName, 0),
-            0.25, getCircleColorAtValue(layerName, 0.25),
-            0.5, getCircleColorAtValue(layerName, 0.5),
-            0.75, getCircleColorAtValue(layerName, 0.75),
-            1, getCircleColorAtValue(layerName, 1)
-          ],
-          "circle-opacity": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            8, 0,
-            9, 0.5,
-            10, 0.75
-          ],
-          "circle-stroke-width": 1,
-          "circle-stroke-color": "rgba(255, 255, 255, 0.4)",
-          "circle-stroke-opacity": 0.4,
-          "circle-blur": 0.4
-        }
-      });
-      
-      layerIds.current.push(sourceId);
+      }
     });
-  }, [activeFilters, weatherData, mapLoaded, country]);
+  }, [activeFilters, mapLoaded]);
 
-  // Generate natural weather data with random scatter (not grid)
-  const generateNaturalWeatherData = (bounds, layerName) => {
+  // Generate GLOBAL weather data (entire world)
+  const generateGlobalWeatherData = (layerName) => {
     const points = [];
-    const numPoints = 2000; // Many scattered points for natural coverage
-    
-    const latRange = bounds.maxLat - bounds.minLat;
-    const lngRange = bounds.maxLng - bounds.minLng;
+    const density = 3000; // Points across entire globe
 
-    // Add margin for smoother edges
-    const margin = 0.1;
-    const marginLat = latRange * margin;
-    const marginLng = lngRange * margin;
+    // World bounds
+    const bounds = {
+      minLat: -85,
+      maxLat: 85,
+      minLng: -180,
+      maxLng: 180
+    };
 
-    console.log(`Generating ${numPoints} scattered points for ${layerName}`);
-
-    // Create weather systems (centers of high/low pressure, storms, etc.)
-    const weatherSystems = [];
-    const numSystems = 5 + Math.floor(Math.random() * 5);
+    // Create global weather systems
+    const systems = [];
+    const numSystems = 15 + Math.floor(Math.random() * 10);
     
     for (let i = 0; i < numSystems; i++) {
-      weatherSystems.push({
-        lat: bounds.minLat + Math.random() * latRange,
-        lng: bounds.minLng + Math.random() * lngRange,
+      systems.push({
+        lat: bounds.minLat + Math.random() * (bounds.maxLat - bounds.minLat),
+        lng: bounds.minLng + Math.random() * (bounds.maxLng - bounds.minLng),
         intensity: 0.3 + Math.random() * 0.7,
-        radius: 0.15 + Math.random() * 0.25
+        radius: 10 + Math.random() * 20 // degrees
       });
     }
 
-    // Generate scattered points with natural distribution
-    for (let i = 0; i < numPoints; i++) {
-      // Random position with slight bias toward center
-      const bias = 0.3;
-      const randLat = Math.random() < bias 
-        ? bounds.minLat + latRange * (0.3 + Math.random() * 0.4)
-        : bounds.minLat - marginLat + (latRange + 2 * marginLat) * Math.random();
-      
-      const randLng = Math.random() < bias
-        ? bounds.minLng + lngRange * (0.3 + Math.random() * 0.4)
-        : bounds.minLng - marginLng + (lngRange + 2 * marginLng) * Math.random();
+    // Generate scattered points globally
+    for (let i = 0; i < density; i++) {
+      const lat = bounds.minLat + Math.random() * (bounds.maxLat - bounds.minLat);
+      const lng = bounds.minLng + Math.random() * (bounds.maxLng - bounds.minLng);
 
-      const lat = randLat;
-      const lng = randLng;
-      
-      // Calculate value based on distance to weather systems
+      // Calculate value based on systems + latitude + noise
       let value = 0;
       let totalWeight = 0;
 
-      weatherSystems.forEach(system => {
+      systems.forEach(system => {
         const distance = Math.sqrt(
-          Math.pow((lat - system.lat) / latRange, 2) + 
-          Math.pow((lng - system.lng) / lngRange, 2)
+          Math.pow(lat - system.lat, 2) + 
+          Math.pow(lng - system.lng, 2)
         );
         
         if (distance < system.radius) {
-          const weight = Math.exp(-distance / system.radius * 3);
+          const weight = Math.exp(-distance / system.radius * 2);
           value += system.intensity * weight;
           totalWeight += weight;
         }
       });
 
-      // Add base noise
-      const seed = lat * 0.1 + lng * 0.1;
-      const noise = Math.sin(seed * 15) * Math.cos(seed * 12);
-      const baseValue = (noise + 1) * 0.5;
+      // Add latitude-based gradient (temperature varies with latitude)
+      const latFactor = layerName === 'temperature' 
+        ? Math.cos((lat * Math.PI) / 180) * 0.5 + 0.5
+        : 0.5;
 
-      // Combine system influence with base noise
-      const combinedValue = totalWeight > 0 
-        ? (value / totalWeight) * 0.7 + baseValue * 0.3
-        : baseValue;
+      // Add Perlin-like noise
+      const seed = lat * 0.05 + lng * 0.05;
+      const noise = (Math.sin(seed * 15) * Math.cos(seed * 12) + 1) * 0.5;
 
-      // Scale to layer-specific range
+      const combined = totalWeight > 0 
+        ? (value / totalWeight) * 0.5 + noise * 0.3 + latFactor * 0.2
+        : noise * 0.7 + latFactor * 0.3;
+
+      // Scale to layer range
       let scaledValue;
       switch(layerName) {
         case 'temperature':
-          scaledValue = 10 + combinedValue * 25; // 10-35°C
+          scaledValue = -10 + combined * 50; // -10 to 40°C
           break;
         case 'rain':
-          scaledValue = combinedValue * 80; // 0-80mm
+          scaledValue = combined * 100;
           break;
         case 'wind':
-          scaledValue = 5 + combinedValue * 35; // 5-40 km/h
+          scaledValue = 5 + combined * 40;
           break;
         case 'clouds':
-          scaledValue = combinedValue * 100; // 0-100%
+          scaledValue = combined * 100;
           break;
         case 'storm':
-          scaledValue = combinedValue > 0.7 ? combinedValue * 100 : combinedValue * 30;
+          scaledValue = combined > 0.7 ? combined * 100 : combined * 25;
           break;
         default:
-          scaledValue = combinedValue * 100;
+          scaledValue = combined * 100;
       }
 
       points.push({ 
-        lat: parseFloat(lat.toFixed(5)), 
-        lng: parseFloat(lng.toFixed(5)), 
+        lat: parseFloat(lat.toFixed(4)), 
+        lng: parseFloat(lng.toFixed(4)), 
         value: parseFloat(scaledValue.toFixed(2))
       });
     }
@@ -319,9 +326,9 @@ const MapContainer = ({
 
   const normalizeValue = (value, layerName) => {
     const ranges = {
-      temperature: { min: 5, max: 35 },
-      rain: { min: 0, max: 80 },
-      wind: { min: 0, max: 40 },
+      temperature: { min: -10, max: 40 },
+      rain: { min: 0, max: 100 },
+      wind: { min: 0, max: 45 },
       clouds: { min: 0, max: 100 },
       storm: { min: 0, max: 100 }
     };
@@ -332,92 +339,11 @@ const MapContainer = ({
 
   const getColorAtValue = (layerName, normalizedValue) => {
     const colorSchemes = {
-      rain: [
-        { stop: 0, color: "rgba(33, 102, 172, 0)" },
-        { stop: 0.2, color: "rgba(67, 147, 195, 0.5)" },
-        { stop: 0.5, color: "rgba(146, 197, 222, 0.75)" },
-        { stop: 0.8, color: "rgba(103, 169, 207, 0.9)" },
-        { stop: 1, color: "rgba(5, 112, 176, 1)" }
-      ],
-      wind: [
-        { stop: 0, color: "rgba(255, 255, 178, 0)" },
-        { stop: 0.2, color: "rgba(254, 204, 92, 0.5)" },
-        { stop: 0.5, color: "rgba(253, 141, 60, 0.75)" },
-        { stop: 0.8, color: "rgba(240, 59, 32, 0.9)" },
-        { stop: 1, color: "rgba(189, 0, 38, 1)" }
-      ],
-      temperature: [
-        { stop: 0, color: "rgba(69, 117, 180, 0)" },
-        { stop: 0.2, color: "rgba(116, 173, 209, 0.5)" },
-        { stop: 0.5, color: "rgba(254, 224, 144, 0.75)" },
-        { stop: 0.8, color: "rgba(244, 109, 67, 0.9)" },
-        { stop: 1, color: "rgba(215, 48, 39, 1)" }
-      ],
-      clouds: [
-        { stop: 0, color: "rgba(247, 247, 247, 0)" },
-        { stop: 0.3, color: "rgba(204, 204, 204, 0.5)" },
-        { stop: 0.7, color: "rgba(150, 150, 150, 0.75)" },
-        { stop: 1, color: "rgba(82, 82, 82, 0.85)" }
-      ],
-      storm: [
-        { stop: 0, color: "rgba(158, 1, 66, 0)" },
-        { stop: 0.3, color: "rgba(213, 62, 79, 0.6)" },
-        { stop: 0.6, color: "rgba(244, 109, 67, 0.8)" },
-        { stop: 1, color: "rgba(254, 224, 139, 0.95)" }
-      ]
-    };
-
-    const scheme = colorSchemes[layerName] || colorSchemes.temperature;
-    
-    for (let i = 0; i < scheme.length - 1; i++) {
-      if (normalizedValue >= scheme[i].stop && normalizedValue <= scheme[i + 1].stop) {
-        return scheme[i].color;
-      }
-    }
-    
-    return scheme[scheme.length - 1].color;
-  };
-
-  const getCircleColorAtValue = (layerName, normalizedValue) => {
-    const colorSchemes = {
-      rain: [
-        "#1a1a1a", // Very dark (almost transparent effect)
-        "#2166ac", 
-        "#4393c3", 
-        "#92c5de", 
-        "#67a9cf",
-        "#053470"
-      ],
-      wind: [
-        "#2a2a2a",
-        "#ffffb2", 
-        "#fecc5c", 
-        "#fd8d3c", 
-        "#f03b20", 
-        "#bd0026"
-      ],
-      temperature: [
-        "#1a1a1a",
-        "#4575b4", 
-        "#74add1", 
-        "#fee090", 
-        "#f46d43", 
-        "#d73027"
-      ],
-      clouds: [
-        "#1a1a1a",
-        "#f7f7f7", 
-        "#cccccc", 
-        "#969696", 
-        "#525252"
-      ],
-      storm: [
-        "#1a1a1a",
-        "#9e0142", 
-        "#d53e4f", 
-        "#f46d43", 
-        "#fee08b"
-      ]
+      rain: ["#1a1a2e", "#2166ac", "#4393c3", "#92c5de", "#67a9cf", "#053470"],
+      wind: ["#1a1a2e", "#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"],
+      temperature: ["#1a1a2e", "#4575b4", "#74add1", "#fee090", "#f46d43", "#d73027"],
+      clouds: ["#1a1a2e", "#f7f7f7", "#cccccc", "#969696", "#525252"],
+      storm: ["#1a1a2e", "#9e0142", "#d53e4f", "#f46d43", "#fee08b"]
     };
 
     const colors = colorSchemes[layerName] || colorSchemes.temperature;
@@ -429,11 +355,8 @@ const MapContainer = ({
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="absolute inset-0" />
 
-      {showWindParticles && mapLoaded && country && (
-        <WindParticleLayer
-          map={map.current}
-          country={country}
-        />
+      {showWindParticles && mapLoaded && (
+        <WindParticleLayer map={map.current} />
       )}
 
       {/* Map info overlay */}
@@ -441,7 +364,7 @@ const MapContainer = ({
         <div className="text-gray-400">
           Viewing:{" "}
           <span className="text-white font-semibold">
-            {country?.name || "Select a country"}
+            {country?.name || "World"}
           </span>
         </div>
 

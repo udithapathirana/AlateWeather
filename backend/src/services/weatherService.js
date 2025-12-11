@@ -2,264 +2,425 @@
 import axios from 'axios';
 import NodeCache from 'node-cache';
 
-const cache = new NodeCache({ stdTTL: 1800 });
+const cache = new NodeCache({ stdTTL: 1800 }); // 30 min cache
 
 class WeatherService {
   constructor() {
-    this.tomorrowApiKey = process.env.TOMORROW_API_KEY;
-    this.openWeatherApiKey = process.env.OPENWEATHER_API_KEY;
-    this.baseUrl = 'https://api.tomorrow.io/v4';
+    // Use OpenWeather for free global data
+    this.openWeatherApiKey = process.env.OPENWEATHER_API_KEY || 'YOUR_API_KEY_HERE';
+    this.openWeatherBaseUrl = 'https://api.openweathermap.org/data/2.5';
   }
 
-  async fetchWeatherForTile(layer, bounds, zoom) {
-    const cacheKey = `tile_${layer}_${bounds.west}_${bounds.south}_${zoom}`;
+  /**
+   * Fetch REAL global weather data from OpenWeatherMap
+   * This fetches actual current weather for a grid of points
+   */
+  async fetchGlobalWeatherData(layer) {
+    const cacheKey = `global_${layer}`;
     const cached = cache.get(cacheKey);
     
     if (cached) {
+      console.log(`Cache hit for global ${layer}`);
       return cached;
     }
 
+    console.log(`Fetching REAL global ${layer} data from API...`);
+
     try {
-      // Generate DENSE grid points for complete coverage
-      const gridSize = Math.max(20, 30 - zoom * 2); // 20-30 points per dimension
-      const points = this.generateDenseGridPoints(bounds, gridSize);
+      const points = [];
+      const gridSize = 30; // 30x30 = 900 API calls (use wisely!)
       
-      console.log(`Generating ${points.length} weather points for ${layer}`);
-      
-      // Generate procedural data (API calls would be too slow for this many points)
-      const weatherData = points.map(point => ({
-        ...point,
-        ...this.generateRealisticWeather(point.lat, point.lng, layer)
-      }));
-      
-      cache.set(cacheKey, weatherData);
-      return weatherData;
-    } catch (error) {
-      console.error('Error fetching weather data:', error.message);
-      return this.generateFallbackData(bounds, layer, zoom);
-    }
-  }
+      const latStep = 170 / gridSize; // -85 to 85
+      const lngStep = 360 / gridSize; // -180 to 180
 
-  generateDenseGridPoints(bounds, gridSize) {
-    const { west, south, east, north } = bounds;
-    const points = [];
-    const latStep = (north - south) / gridSize;
-    const lngStep = (east - west) / gridSize;
+      // Batch API requests
+      const requests = [];
+      const positions = [];
 
-    for (let i = 0; i <= gridSize; i++) {
-      for (let j = 0; j <= gridSize; j++) {
-        points.push({
-          lat: parseFloat((south + i * latStep).toFixed(5)),
-          lng: parseFloat((west + j * lngStep).toFixed(5))
-        });
-      }
-    }
-    return points;
-  }
-
-  generateRealisticWeather(lat, lng, layer) {
-    // Use multiple noise functions for realistic patterns
-    const seed1 = lat * 0.1 + lng * 0.1;
-    const seed2 = lat * 0.05 + lng * 0.15;
-    const seed3 = lat * 0.15 + lng * 0.05;
-    
-    const noise1 = Math.sin(seed1 * 10) * Math.cos(seed1 * 8);
-    const noise2 = Math.sin(seed2 * 12) * Math.cos(seed2 * 6);
-    const noise3 = Math.sin(seed3 * 8) * Math.cos(seed3 * 10);
-    const combined = (noise1 + noise2 + noise3) / 3;
-
-    let value, windSpeed, windDirection;
-
-    switch (layer) {
-      case 'rain':
-        // Rain: 0-50mm with realistic patches
-        value = Math.max(0, (combined + 1) * 25 + Math.abs(noise3) * 25);
-        windSpeed = 5 + Math.abs(noise1 * 15);
-        windDirection = ((noise2 + 1) * 180) % 360;
-        break;
-        
-      case 'wind':
-        // Wind: 5-45 km/h
-        value = Math.abs(combined * 20) + 15 + Math.abs(noise2 * 10);
-        windSpeed = value;
-        windDirection = ((noise1 + 1) * 180) % 360;
-        break;
-        
-      case 'temperature':
-        // Temperature: 5-35°C with smooth gradients
-        value = 20 + (combined * 15) + (lat * 0.1); // Latitude affects temp
-        windSpeed = 5 + Math.abs(noise1 * 10);
-        windDirection = ((noise2 + 1) * 180) % 360;
-        break;
-        
-      case 'clouds':
-        // Clouds: 0-100%
-        value = Math.max(0, Math.min(100, (combined + 1) * 50 + noise2 * 25));
-        windSpeed = 5 + Math.abs(noise1 * 10);
-        windDirection = ((noise2 + 1) * 180) % 360;
-        break;
-        
-      case 'storm':
-        // Storm: Patches of high intensity
-        const stormThreshold = 0.5;
-        if (combined > stormThreshold) {
-          value = 60 + Math.abs(combined * 40);
-        } else {
-          value = Math.abs(combined * 30);
+      for (let i = 0; i <= gridSize; i += 2) { // Skip some to reduce API calls
+        for (let j = 0; j <= gridSize; j += 2) {
+          const lat = -85 + i * latStep;
+          const lng = -180 + j * lngStep;
+          
+          positions.push({ lat, lng });
+          requests.push(this.fetchPointWeather(lat, lng));
         }
-        windSpeed = value * 0.8; // High wind in storms
-        windDirection = ((noise1 + 1) * 180) % 360;
-        break;
-        
-      default:
-        value = (combined + 1) * 50;
-        windSpeed = Math.abs(noise1 * 15);
-        windDirection = ((noise2 + 1) * 180) % 360;
-    }
-
-    return {
-      value: parseFloat(value.toFixed(2)),
-      windSpeed: parseFloat(windSpeed.toFixed(2)),
-      windDirection: parseFloat(windDirection.toFixed(1))
-    };
-  }
-
-  generateFallbackData(bounds, layer, zoom) {
-    const gridSize = Math.max(20, 30 - zoom * 2);
-    const points = this.generateDenseGridPoints(bounds, gridSize);
-    
-    return points.map(point => ({
-      ...point,
-      ...this.generateRealisticWeather(point.lat, point.lng, layer)
-    }));
-  }
-
-  async fetchCountryWeather(countryCode, layers) {
-    const cacheKey = `country_${countryCode}_${layers.join('_')}`;
-    const cached = cache.get(cacheKey);
-    
-    if (cached) {
-      console.log(`Cache hit for ${cacheKey}`);
-      return cached;
-    }
-
-    try {
-      const coordinates = this.getCountryCoordinates(countryCode);
-      const weatherData = {
-        country: countryCode,
-        coordinates,
-        layers: {},
-        timestamp: new Date().toISOString()
-      };
-
-      console.log(`Fetching weather for ${countryCode}, layers: ${layers.join(', ')}`);
-
-      for (const layer of layers) {
-        // Generate dense grid for each layer
-        const bounds = {
-          west: coordinates.minLng,
-          south: coordinates.minLat,
-          east: coordinates.maxLng,
-          north: coordinates.maxLat
-        };
-        
-        const gridSize = 30; // 30x30 = 900 points per layer
-        const gridPoints = this.generateDenseGridPoints(bounds, gridSize);
-        
-        const layerData = gridPoints.map(point => ({
-          ...point,
-          ...this.generateRealisticWeather(point.lat, point.lng, layer)
-        }));
-
-        weatherData.layers[layer] = layerData;
-        console.log(`Generated ${layerData.length} points for ${layer}`);
       }
 
-      cache.set(cacheKey, weatherData);
-      return weatherData;
-    } catch (error) {
-      console.error('Error fetching country weather:', error);
-      throw error;
-    }
-  }
+      // Execute all requests in parallel (be careful with rate limits!)
+      const results = await Promise.allSettled(requests);
 
-  getCountryCoordinates(countryCode) {
-    const countries = {
-      US: { minLat: 25, maxLat: 49, minLng: -125, maxLng: -66 },
-      GB: { minLat: 50, maxLat: 59, minLng: -8, maxLng: 2 },
-      AU: { minLat: -44, maxLat: -10, minLng: 113, maxLng: 154 },
-      JP: { minLat: 24, maxLat: 46, minLng: 123, maxLng: 146 },
-      BR: { minLat: -34, maxLat: 5, minLng: -74, maxLng: -34 },
-      IN: { minLat: 8, maxLat: 35, minLng: 68, maxLng: 97 },
-      DE: { minLat: 47, maxLat: 55, minLng: 6, maxLng: 15 },
-      CA: { minLat: 42, maxLat: 70, minLng: -141, maxLng: -52 }
-    };
-    return countries[countryCode] || countries.US;
-  }
+      results.forEach((result, idx) => {
+        if (result.status === 'fulfilled' && result.value) {
+          const data = result.value;
+          const pos = positions[idx];
+          
+          points.push({
+            lat: parseFloat(pos.lat.toFixed(4)),
+            lng: parseFloat(pos.lng.toFixed(4)),
+            value: this.extractValue(data, layer),
+            windSpeed: data.wind?.speed || 0,
+            windDirection: data.wind?.deg || 0,
+            temperature: data.main?.temp || 0,
+            humidity: data.main?.humidity || 0,
+            pressure: data.main?.pressure || 0,
+            clouds: data.clouds?.all || 0,
+            rain: data.rain?.['1h'] || 0
+          });
+        }
+      });
 
-  async fetchPointData(point, layer) {
-    try {
-      // For production: uncomment to use real API
-      // const response = await axios.get(`${this.baseUrl}/weather/realtime`, {
-      //   params: {
-      //     location: `${point.lat},${point.lng}`,
-      //     apikey: this.tomorrowApiKey,
-      //     fields: this.getFieldsForLayer(layer)
-      //   },
-      //   timeout: 5000
-      // });
-      // const data = response.data.data.values;
+      console.log(`✓ Fetched ${points.length} real data points for ${layer}`);
+
+      // Interpolate to fill gaps
+      const interpolated = this.interpolateGlobalData(points, layer);
       
-      // For now: use procedural generation
-      return {
-        lat: point.lat,
-        lng: point.lng,
-        ...this.generateRealisticWeather(point.lat, point.lng, layer)
-      };
+      cache.set(cacheKey, interpolated);
+      return interpolated;
+
     } catch (error) {
-      return {
-        lat: point.lat,
-        lng: point.lng,
-        ...this.generateRealisticWeather(point.lat, point.lng, layer)
-      };
+      console.error('Error fetching global weather:', error.message);
+      // Fallback to procedural only if API fails
+      return this.generateFallbackData(layer);
     }
   }
 
-  getFieldsForLayer(layer) {
-    const fieldMap = {
-      rain: 'precipitationIntensity,precipitationType',
-      wind: 'windSpeed,windDirection,windGust',
-      temperature: 'temperature,temperatureApparent',
-      clouds: 'cloudCover,cloudBase,cloudCeiling',
-      storm: 'precipitationIntensity,windSpeed,windGust,lightning'
-    };
-    return fieldMap[layer] || 'temperature';
+  /**
+   * Fetch weather for a single point from OpenWeatherMap
+   */
+  async fetchPointWeather(lat, lng) {
+    try {
+      const response = await axios.get(`${this.openWeatherBaseUrl}/weather`, {
+        params: {
+          lat,
+          lon: lng,
+          appid: this.openWeatherApiKey,
+          units: 'metric'
+        },
+        timeout: 5000
+      });
+
+      return response.data;
+    } catch (error) {
+      // Silent fail for individual points
+      return null;
+    }
   }
 
+  /**
+   * Extract value for specific layer from API response
+   */
   extractValue(data, layer) {
+    if (!data) return 0;
+
     switch (layer) {
-      case 'rain':
-        return data.precipitationIntensity || 0;
-      case 'wind':
-        return data.windSpeed || 0;
       case 'temperature':
-        return data.temperature || 0;
+        return data.main?.temp || 15;
+      
+      case 'rain':
+        return (data.rain?.['1h'] || 0) + (data.rain?.['3h'] || 0) / 3;
+      
+      case 'wind':
+        return data.wind?.speed || 0;
+      
       case 'clouds':
-        return data.cloudCover || 0;
+        return data.clouds?.all || 0;
+      
       case 'storm':
-        const precip = data.precipitationIntensity || 0;
-        const wind = data.windSpeed || 0;
-        const lightning = data.lightning || 0;
-        return (precip * 10 + wind * 2 + lightning * 20);
+        const rain = (data.rain?.['1h'] || 0);
+        const wind = data.wind?.speed || 0;
+        const clouds = data.clouds?.all || 0;
+        return Math.min(100, rain * 5 + wind * 2 + clouds * 0.3);
+      
       default:
         return 0;
     }
   }
-}
 
-export const fetchWeatherForTile = async (layer, bounds, zoom) => {
-  const service = new WeatherService();
-  return service.fetchWeatherForTile(layer, bounds, zoom);
-};
+  /**
+   * Interpolate sparse API data to create smooth coverage
+   */
+  interpolateGlobalData(points, layer) {
+    if (points.length === 0) {
+      return this.generateFallbackData(layer);
+    }
+
+    const interpolated = [];
+    const gridSize = 60; // Output resolution
+    
+    const latStep = 170 / gridSize;
+    const lngStep = 360 / gridSize;
+
+    for (let i = 0; i <= gridSize; i++) {
+      for (let j = 0; j <= gridSize; j++) {
+        const lat = -85 + i * latStep;
+        const lng = -180 + j * lngStep;
+
+        // Find nearest data points for interpolation
+        const nearest = points
+          .map(p => ({
+            ...p,
+            distance: Math.sqrt(
+              Math.pow(p.lat - lat, 2) + 
+              Math.pow(p.lng - lng, 2)
+            )
+          }))
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 4); // Use 4 nearest points
+
+        if (nearest.length === 0) continue;
+
+        // Inverse distance weighting
+        let sumValue = 0;
+        let sumWeight = 0;
+        let sumWindU = 0;
+        let sumWindV = 0;
+
+        nearest.forEach(point => {
+          const weight = 1 / (point.distance + 0.1);
+          sumValue += point.value * weight;
+          
+          // Convert wind to U/V components
+          const radians = (point.windDirection * Math.PI) / 180;
+          const u = point.windSpeed * Math.cos(radians);
+          const v = point.windSpeed * Math.sin(radians);
+          
+          sumWindU += u * weight;
+          sumWindV += v * weight;
+          sumWeight += weight;
+        });
+
+        interpolated.push({
+          lat: parseFloat(lat.toFixed(4)),
+          lng: parseFloat(lng.toFixed(4)),
+          value: parseFloat((sumValue / sumWeight).toFixed(2)),
+          windU: parseFloat((sumWindU / sumWeight).toFixed(2)),
+          windV: parseFloat((sumWindV / sumWeight).toFixed(2)),
+          windSpeed: Math.sqrt(
+            Math.pow(sumWindU / sumWeight, 2) + 
+            Math.pow(sumWindV / sumWeight, 2)
+          ),
+          windDirection: Math.atan2(sumWindV / sumWeight, sumWindU / sumWeight) * (180 / Math.PI)
+        });
+      }
+    }
+
+    console.log(`✓ Interpolated to ${interpolated.length} points`);
+    return interpolated;
+  }
+
+  /**
+   * Get REAL wind vector field for the entire globe
+   */
+  async getGlobalWindField() {
+    const cacheKey = 'global_wind_field';
+    const cached = cache.get(cacheKey);
+    
+    if (cached) {
+      console.log('Cache hit for global wind field');
+      return cached;
+    }
+
+    console.log('Fetching REAL global wind field...');
+
+    try {
+      // Fetch wind data
+      const windData = await this.fetchGlobalWeatherData('wind');
+      
+      // Build grid
+      const gridSize = 60;
+      const grid = [];
+      
+      const latStep = 170 / gridSize;
+      const lngStep = 360 / gridSize;
+
+      for (let y = 0; y <= gridSize; y++) {
+        const row = [];
+        const lat = -85 + y * latStep;
+        
+        for (let x = 0; x <= gridSize; x++) {
+          const lng = -180 + x * lngStep;
+
+          // Find nearest wind data point
+          const nearest = windData
+            .map(p => ({
+              ...p,
+              distance: Math.sqrt(
+                Math.pow(p.lat - lat, 2) + 
+                Math.pow(p.lng - lng, 2)
+              )
+            }))
+            .sort((a, b) => a.distance - b.distance)
+            .slice(0, 4);
+
+          if (nearest.length === 0) {
+            row.push({ u: 0, v: 0 });
+            continue;
+          }
+
+          // Inverse distance weighting
+          let sumU = 0, sumV = 0, sumW = 0;
+
+          nearest.forEach(point => {
+            const weight = 1 / (point.distance + 0.1);
+            sumU += (point.windU || 0) * weight;
+            sumV += (point.windV || 0) * weight;
+            sumW += weight;
+          });
+
+          row.push({
+            u: sumU / sumW,
+            v: sumV / sumW
+          });
+        }
+        grid.push(row);
+      }
+
+      const windField = {
+        grid,
+        gridSize,
+        latMin: -85,
+        latMax: 85,
+        lngMin: -180,
+        lngMax: 180,
+        timestamp: new Date().toISOString()
+      };
+
+      cache.set(cacheKey, windField);
+      console.log('✓ Global wind field ready');
+      return windField;
+
+    } catch (error) {
+      console.error('Error fetching wind field:', error.message);
+      return this.generateFallbackWindField();
+    }
+  }
+
+  /**
+   * Fallback data generation (only used if API fails)
+   */
+  generateFallbackData(layer) {
+    console.warn(`Using fallback procedural data for ${layer}`);
+    
+    const points = [];
+    const gridSize = 40;
+    const latStep = 170 / gridSize;
+    const lngStep = 360 / gridSize;
+
+    for (let i = 0; i <= gridSize; i++) {
+      for (let j = 0; j <= gridSize; j++) {
+        const lat = -85 + i * latStep;
+        const lng = -180 + j * lngStep;
+
+        const seed = lat * 0.05 + lng * 0.05;
+        const noise = (Math.sin(seed * 15) * Math.cos(seed * 12) + 1) * 0.5;
+        const latFactor = layer === 'temperature' 
+          ? Math.cos((lat * Math.PI) / 180) * 0.5 + 0.5
+          : 0.5;
+
+        const combined = noise * 0.7 + latFactor * 0.3;
+
+        let value;
+        switch(layer) {
+          case 'temperature':
+            value = -10 + combined * 50;
+            break;
+          case 'rain':
+            value = combined * 100;
+            break;
+          case 'wind':
+            value = 5 + combined * 40;
+            break;
+          case 'clouds':
+            value = combined * 100;
+            break;
+          case 'storm':
+            value = combined > 0.7 ? combined * 100 : combined * 25;
+            break;
+          default:
+            value = combined * 100;
+        }
+
+        points.push({
+          lat: parseFloat(lat.toFixed(4)),
+          lng: parseFloat(lng.toFixed(4)),
+          value: parseFloat(value.toFixed(2)),
+          windU: 0,
+          windV: 0
+        });
+      }
+    }
+
+    return points;
+  }
+
+  generateFallbackWindField() {
+    console.warn('Using fallback procedural wind field');
+    
+    const gridSize = 60;
+    const grid = [];
+    const latStep = 170 / gridSize;
+    const lngStep = 360 / gridSize;
+
+    for (let y = 0; y <= gridSize; y++) {
+      const row = [];
+      const lat = -85 + y * latStep;
+      
+      for (let x = 0; x <= gridSize; x++) {
+        const lng = -180 + x * lngStep;
+
+        const latRad = (lat * Math.PI) / 180;
+        const absLat = Math.abs(lat);
+        
+        let u, v;
+        if (absLat < 30) {
+          u = -10;
+          v = 0;
+        } else if (absLat < 60) {
+          u = 15;
+          v = 0;
+        } else {
+          u = -8;
+          v = 0;
+        }
+
+        const s = lat * 0.05 + lng * 0.05;
+        const noise = Math.sin(s * 8) * Math.cos(s * 6);
+        
+        row.push({ u: u + noise * 5, v: v + noise * 3 });
+      }
+      grid.push(row);
+    }
+
+    return {
+      grid,
+      gridSize,
+      latMin: -85,
+      latMax: 85,
+      lngMin: -180,
+      lngMax: 180,
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  /**
+   * Legacy method for compatibility
+   */
+  async fetchCountryWeather(countryCode, layers) {
+    console.log(`Fetching weather for ${countryCode}`);
+    
+    const weatherData = {
+      country: countryCode,
+      layers: {},
+      timestamp: new Date().toISOString()
+    };
+
+    for (const layer of layers) {
+      weatherData.layers[layer] = await this.fetchGlobalWeatherData(layer);
+    }
+
+    return weatherData;
+  }
+}
 
 export default new WeatherService();
