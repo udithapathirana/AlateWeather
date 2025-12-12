@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import WindParticleLayer from './WindParticleLayer';
+import { getGlobalWeatherLayer } from '../../services/api';
 
 const MapContainer = ({
   country,
@@ -17,14 +18,14 @@ const MapContainer = ({
   const [mapLoaded, setMapLoaded] = useState(false);
   const layerIds = useRef([]);
 
-  // Initialize map
+  // Initialize map ONCE - never recreate
   useEffect(() => {
     if (map.current) return;
 
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
-      center: [0, 20], // Global center
+      center: [0, 20],
       zoom: 2,
       minZoom: 1,
       maxZoom: 12
@@ -48,9 +49,9 @@ const MapContainer = ({
         map.current = null;
       }
     };
-  }, []);
+  }, []); // Empty deps - only create once
 
-  // Navigate to country (don't reload data)
+  // Navigate to country (separate effect)
   useEffect(() => {
     if (map.current && country) {
       map.current.flyTo({
@@ -61,268 +62,115 @@ const MapContainer = ({
     }
   }, [country]);
 
-  // Load GLOBAL weather layers once from REAL API
+  // Load weather layers
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
-    console.log('Loading global weather layers from API...');
+    const loadLayers = async () => {
+      console.log('Loading layers...');
 
-    // Remove previous layers
-    layerIds.current.forEach((sourceId) => {
-      const layerId = `${sourceId}-layer`;
-      if (map.current.getLayer(layerId)) {
-        map.current.removeLayer(layerId);
-      }
-      if (map.current.getSource(sourceId)) {
-        map.current.removeSource(sourceId);
-      }
-    });
-    layerIds.current = [];
-
-    const activeLayers = Object.entries(activeFilters).filter(([_, active]) => active);
-
-    if (activeLayers.length === 0) {
-      return;
-    }
-
-    // Fetch REAL data for each active layer
-    activeLayers.forEach(async ([layerName]) => {
-      const sourceId = `weather-${layerName}`;
-      console.log(`Fetching REAL ${layerName} data from API...`);
-
-      try {
-        // Import the API service
-        const { weatherAPI } = await import('../../services/api');
-        
-        // Fetch real global data
-        const response = await weatherAPI.getGlobalWeatherLayer(layerName);
-        const globalData = response.data;
-
-        console.log(`✓ Received ${globalData.length} real data points for ${layerName}`);
-
-        const features = globalData.map((point) => ({
-          type: "Feature",
-          geometry: {
-            type: "Point",
-            coordinates: [point.lng, point.lat]
-          },
-          properties: {
-            value: point.value,
-            normalizedValue: normalizeValue(point.value, layerName)
-          }
-        }));
-
-        const geojson = {
-          type: "FeatureCollection",
-          features
-        };
-
-        // Add source
+      // Remove previous layers
+      layerIds.current.forEach((sourceId) => {
+        const layerId = `${sourceId}-layer`;
+        if (map.current.getLayer(layerId)) {
+          map.current.removeLayer(layerId);
+        }
         if (map.current.getSource(sourceId)) {
-          map.current.getSource(sourceId).setData(geojson);
-        } else {
-          map.current.addSource(sourceId, {
-            type: "geojson",
-            data: geojson
-          });
-
-          // Add layer with blurred circles (heatmap effect)
-          const layerId = `${sourceId}-layer`;
-          map.current.addLayer({
-            id: layerId,
-            type: "circle",
-            source: sourceId,
-            paint: {
-              "circle-radius": [
-                "interpolate",
-                ["exponential", 2],
-                ["zoom"],
-                1, 15,
-                3, 25,
-                5, 35,
-                7, 45,
-                10, 60
-              ],
-              "circle-color": [
-                "interpolate",
-                ["linear"],
-                ["get", "normalizedValue"],
-                0, getColorAtValue(layerName, 0),
-                0.2, getColorAtValue(layerName, 0.2),
-                0.4, getColorAtValue(layerName, 0.4),
-                0.6, getColorAtValue(layerName, 0.6),
-                0.8, getColorAtValue(layerName, 0.8),
-                1, getColorAtValue(layerName, 1)
-              ],
-              "circle-opacity": 0.35,
-              "circle-blur": 1.0
-            }
-          });
-          
-          layerIds.current.push(sourceId);
+          map.current.removeSource(sourceId);
         }
+      });
+      layerIds.current = [];
 
-        console.log(`✓ Rendered REAL ${layerName} layer on map`);
+      const activeLayers = Object.entries(activeFilters).filter(([_, active]) => active);
 
-      } catch (error) {
-        console.error(`Failed to fetch ${layerName}:`, error);
-        // Fallback to procedural if API fails
-        console.warn(`Using fallback data for ${layerName}`);
-        const fallbackData = generateGlobalWeatherData(layerName);
-        
-        const features = fallbackData.map((point) => ({
-          type: "Feature",
-          geometry: {
-            type: "Point",
-            coordinates: [point.lng, point.lat]
-          },
-          properties: {
-            value: point.value,
-            normalizedValue: normalizeValue(point.value, layerName)
+      if (activeLayers.length === 0) {
+        console.log('No active layers');
+        return;
+      }
+
+      for (const [layerName] of activeLayers) {
+        const sourceId = `weather-${layerName}`;
+        console.log(`Loading ${layerName}...`);
+
+        try {
+          const response = await getGlobalWeatherLayer(layerName);
+          const data = response.data;
+
+          if (!data || data.length === 0) {
+            console.warn(`No data for ${layerName}`);
+            continue;
           }
-        }));
 
-        const geojson = {
-          type: "FeatureCollection",
-          features
-        };
+          console.log(`✓ Loaded ${data.length} points for ${layerName}`);
 
-        if (!map.current.getSource(sourceId)) {
-          map.current.addSource(sourceId, {
-            type: "geojson",
-            data: geojson
-          });
-
-          const layerId = `${sourceId}-layer`;
-          map.current.addLayer({
-            id: layerId,
-            type: "circle",
-            source: sourceId,
-            paint: {
-              "circle-radius": [
-                "interpolate",
-                ["exponential", 2],
-                ["zoom"],
-                1, 15,
-                3, 25,
-                5, 35,
-                7, 45,
-                10, 60
-              ],
-              "circle-color": [
-                "interpolate",
-                ["linear"],
-                ["get", "normalizedValue"],
-                0, getColorAtValue(layerName, 0),
-                0.2, getColorAtValue(layerName, 0.2),
-                0.4, getColorAtValue(layerName, 0.4),
-                0.6, getColorAtValue(layerName, 0.6),
-                0.8, getColorAtValue(layerName, 0.8),
-                1, getColorAtValue(layerName, 1)
-              ],
-              "circle-opacity": 0.35,
-              "circle-blur": 1.0
+          const features = data.map((point) => ({
+            type: "Feature",
+            geometry: {
+              type: "Point",
+              coordinates: [point.lng, point.lat]
+            },
+            properties: {
+              value: point.value,
+              normalizedValue: normalizeValue(point.value, layerName)
             }
-          });
-          
-          layerIds.current.push(sourceId);
+          }));
+
+          const geojson = {
+            type: "FeatureCollection",
+            features
+          };
+
+          if (!map.current.getSource(sourceId)) {
+            map.current.addSource(sourceId, {
+              type: "geojson",
+              data: geojson
+            });
+
+            const layerId = `${sourceId}-layer`;
+            map.current.addLayer({
+              id: layerId,
+              type: "circle",
+              source: sourceId,
+              paint: {
+                "circle-radius": [
+                  "interpolate",
+                  ["exponential", 2],
+                  ["zoom"],
+                  1, 15,
+                  3, 25,
+                  5, 35,
+                  7, 45,
+                  10, 60
+                ],
+                "circle-color": [
+                  "interpolate",
+                  ["linear"],
+                  ["get", "normalizedValue"],
+                  0, getColorAtValue(layerName, 0),
+                  0.2, getColorAtValue(layerName, 0.2),
+                  0.4, getColorAtValue(layerName, 0.4),
+                  0.6, getColorAtValue(layerName, 0.6),
+                  0.8, getColorAtValue(layerName, 0.8),
+                  1, getColorAtValue(layerName, 1)
+                ],
+                "circle-opacity": 0.35,
+                "circle-blur": 1.0
+              }
+            });
+            
+            layerIds.current.push(sourceId);
+            console.log(`✓ Rendered ${layerName}`);
+          }
+        } catch (error) {
+          console.error(`Failed to load ${layerName}:`, error);
         }
       }
-    });
-  }, [activeFilters, mapLoaded]);
 
-  // Generate GLOBAL weather data (entire world)
-  const generateGlobalWeatherData = (layerName) => {
-    const points = [];
-    const density = 3000; // Points across entire globe
-
-    // World bounds
-    const bounds = {
-      minLat: -85,
-      maxLat: 85,
-      minLng: -180,
-      maxLng: 180
+      console.log('✓ All layers loaded');
     };
 
-    // Create global weather systems
-    const systems = [];
-    const numSystems = 15 + Math.floor(Math.random() * 10);
-    
-    for (let i = 0; i < numSystems; i++) {
-      systems.push({
-        lat: bounds.minLat + Math.random() * (bounds.maxLat - bounds.minLat),
-        lng: bounds.minLng + Math.random() * (bounds.maxLng - bounds.minLng),
-        intensity: 0.3 + Math.random() * 0.7,
-        radius: 10 + Math.random() * 20 // degrees
-      });
-    }
-
-    // Generate scattered points globally
-    for (let i = 0; i < density; i++) {
-      const lat = bounds.minLat + Math.random() * (bounds.maxLat - bounds.minLat);
-      const lng = bounds.minLng + Math.random() * (bounds.maxLng - bounds.minLng);
-
-      // Calculate value based on systems + latitude + noise
-      let value = 0;
-      let totalWeight = 0;
-
-      systems.forEach(system => {
-        const distance = Math.sqrt(
-          Math.pow(lat - system.lat, 2) + 
-          Math.pow(lng - system.lng, 2)
-        );
-        
-        if (distance < system.radius) {
-          const weight = Math.exp(-distance / system.radius * 2);
-          value += system.intensity * weight;
-          totalWeight += weight;
-        }
-      });
-
-      // Add latitude-based gradient (temperature varies with latitude)
-      const latFactor = layerName === 'temperature' 
-        ? Math.cos((lat * Math.PI) / 180) * 0.5 + 0.5
-        : 0.5;
-
-      // Add Perlin-like noise
-      const seed = lat * 0.05 + lng * 0.05;
-      const noise = (Math.sin(seed * 15) * Math.cos(seed * 12) + 1) * 0.5;
-
-      const combined = totalWeight > 0 
-        ? (value / totalWeight) * 0.5 + noise * 0.3 + latFactor * 0.2
-        : noise * 0.7 + latFactor * 0.3;
-
-      // Scale to layer range
-      let scaledValue;
-      switch(layerName) {
-        case 'temperature':
-          scaledValue = -10 + combined * 50; // -10 to 40°C
-          break;
-        case 'rain':
-          scaledValue = combined * 100;
-          break;
-        case 'wind':
-          scaledValue = 5 + combined * 40;
-          break;
-        case 'clouds':
-          scaledValue = combined * 100;
-          break;
-        case 'storm':
-          scaledValue = combined > 0.7 ? combined * 100 : combined * 25;
-          break;
-        default:
-          scaledValue = combined * 100;
-      }
-
-      points.push({ 
-        lat: parseFloat(lat.toFixed(4)), 
-        lng: parseFloat(lng.toFixed(4)), 
-        value: parseFloat(scaledValue.toFixed(2))
-      });
-    }
-
-    return points;
-  };
+    loadLayers();
+  }, [activeFilters, mapLoaded]);
 
   const normalizeValue = (value, layerName) => {
     const ranges = {
@@ -355,11 +203,14 @@ const MapContainer = ({
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="absolute inset-0" />
 
-      {showWindParticles && mapLoaded && (
-        <WindParticleLayer map={map.current} />
+      {/* Always render WindParticleLayer, control with enabled prop */}
+      {mapLoaded && (
+        <WindParticleLayer 
+          map={map.current} 
+          enabled={showWindParticles} 
+        />
       )}
 
-      {/* Map info overlay */}
       <div className="absolute top-4 left-4 bg-gray-800 bg-opacity-90 px-4 py-2 rounded-lg text-sm shadow-lg">
         <div className="text-gray-400">
           Viewing:{" "}

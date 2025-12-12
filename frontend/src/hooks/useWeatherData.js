@@ -1,6 +1,6 @@
 // frontend/src/hooks/useWeatherData.js
-import { useState, useEffect, useCallback } from 'react';
-import { weatherAPI } from '../services/api';
+import { useState, useEffect, useCallback } from "react";
+import { weatherAPI } from "../services/api";
 
 const useWeatherData = (country, activeFilters) => {
   const [weatherData, setWeatherData] = useState(null);
@@ -8,7 +8,13 @@ const useWeatherData = (country, activeFilters) => {
   const [error, setError] = useState(null);
 
   const fetchData = useCallback(async () => {
-    if (!country) {
+    if (!activeFilters) return;
+
+    const layers = Object.entries(activeFilters)
+      .filter(([_, enabled]) => enabled)
+      .map(([key]) => key);
+
+    if (layers.length === 0) {
       setWeatherData(null);
       return;
     }
@@ -17,48 +23,27 @@ const useWeatherData = (country, activeFilters) => {
     setError(null);
 
     try {
-      const activeLayers = Object.entries(activeFilters)
-        .filter(([_, active]) => active)
-        .map(([key]) => key);
+      const results = {};
 
-      if (activeLayers.length === 0) {
-        setWeatherData(null);
-        setLoading(false);
-        return;
+      for (const layer of layers) {
+        const response = await weatherAPI.getGlobalWeatherLayer(layer);
+        results[layer] = response.data;
       }
 
-      const response = await weatherAPI.getCountryWeather(
-        country.code,
-        activeLayers
-      );
-
-      if (response.success) {
-        setWeatherData(response.data);
-      } else {
-        throw new Error('Failed to fetch weather data');
-      }
+      setWeatherData(results);
     } catch (err) {
-      console.error('Error fetching weather data:', err);
-      setError(err.message || 'Failed to load weather data');
+      console.error("Error loading global weather:", err);
+      setError("Failed to load global weather");
     } finally {
       setLoading(false);
     }
-  }, [country, activeFilters]);
+  }, [activeFilters]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const refetch = useCallback(() => {
-    fetchData();
-  }, [fetchData]);
-
-  return {
-    weatherData,
-    loading,
-    error,
-    refetch
-  };
+  return { weatherData, loading, error, refetch: fetchData };
 };
 
 export default useWeatherData;

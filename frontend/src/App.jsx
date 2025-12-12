@@ -7,7 +7,7 @@ import Legend from './components/Sidebar/Legend';
 import { LoadingSpinner } from './components/UI/LoadingSpinner';
 import { ErrorMessage } from './components/UI/ErrorMessage';
 import useWeatherData from './hooks/useWeatherData';
-import websocketService from './services/websocket';
+
 import { Cloud } from 'lucide-react';
 
 function App() {
@@ -28,28 +28,6 @@ function App() {
     activeFilters
   );
 
-  useEffect(() => {
-    // Connect to WebSocket for real-time updates
-    websocketService.connect();
-
-    websocketService.on('tiles-updated', () => {
-      console.log('Tiles updated, refreshing...');
-      if (selectedCountry) {
-        refetch();
-      }
-    });
-
-    return () => {
-      websocketService.disconnect();
-    };
-  }, [selectedCountry, refetch]);
-
-  useEffect(() => {
-    if (selectedCountry) {
-      websocketService.subscribe(selectedCountry.code);
-    }
-  }, [selectedCountry]);
-
   const handleCountrySelect = (country) => {
     setSelectedCountry(country);
   };
@@ -60,7 +38,7 @@ function App() {
 
   const handleTimelineChange = (hour) => {
     setTimelineHour(hour);
-    // Fetch forecast data for this hour
+    // Future forecast fetch can go here
   };
 
   return (
