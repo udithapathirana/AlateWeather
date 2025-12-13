@@ -1,10 +1,14 @@
 // backend/src/server.js
+import dotenv from 'dotenv';
+import path from 'path';
+
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import weatherRoutes from './routes/weatherRoutes.js';
 
-dotenv.config();
+
+
 
 const app = express();
 const PORT = process.env.PORT || 3001; // Changed from 5000 to 3001

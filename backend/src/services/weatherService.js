@@ -4,6 +4,7 @@ import NodeCache from 'node-cache';
 
 const cache = new NodeCache({ stdTTL: 1800 }); // 30 min cache
 
+
 class WeatherService {
   constructor() {
     // Use OpenWeather for free global data
