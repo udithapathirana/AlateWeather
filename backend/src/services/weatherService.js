@@ -7,7 +7,7 @@ const cache = new NodeCache({ stdTTL: 1800 }); // 30 min cache
 class WeatherService {
   constructor() {
     // Use OpenWeather for free global data
-    this.openWeatherApiKey = process.env.OPENWEATHER_API_KEY || 'YOUR_API_KEY_HERE';
+    this.openWeatherApiKey = process.env.OPENWEATHER_API_KEY || '6dbda6574cef7b6093a92d6b4b570126';
     this.openWeatherBaseUrl = 'https://api.openweathermap.org/data/2.5';
   }
 
