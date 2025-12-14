@@ -1,63 +1,124 @@
 // frontend/src/components/Sidebar/LayerControls.jsx
 import React from 'react';
-import { Droplets, Wind, Thermometer, Cloud, Zap, Eye, EyeOff } from 'lucide-react';
+import { CloudRain, Wind, Thermometer, Cloud, Zap, Eye } from 'lucide-react';
 
 const LAYERS = [
-  { key: 'rain', icon: Droplets, label: 'Precipitation', color: 'text-blue-400' },
-  { key: 'wind', icon: Wind, label: 'Wind Speed', color: 'text-yellow-400' },
-  { key: 'temperature', icon: Thermometer, label: 'Temperature', color: 'text-red-400' },
-  { key: 'clouds', icon: Cloud, label: 'Cloud Cover', color: 'text-gray-400' },
-  { key: 'storm', icon: Zap, label: 'Storm Activity', color: 'text-purple-400' }
+  { id: 'rain', name: 'Precipitation', icon: CloudRain, color: '#3b82f6' },
+  { id: 'wind', name: 'Wind Speed', icon: Wind, color: '#f59e0b' },
+  { id: 'temperature', name: 'Temperature', icon: Thermometer, color: '#ef4444' },
+  { id: 'clouds', name: 'Cloud Cover', icon: Cloud, color: '#9ca3af' },
+  { id: 'storm', name: 'Storm Activity', icon: Zap, color: '#8b5cf6' }
 ];
 
-const LayerControls = ({ activeFilters, onToggleFilter, showWindParticles, onToggleWindParticles }) => {
+const LayerControls = ({ 
+  activeFilters, 
+  onToggleFilter,
+  showWindParticles,
+  onToggleWindParticles
+}) => {
   return (
-    <div>
-      <h2 className="text-lg font-semibold mb-3">Weather Layers</h2>
+    <div className="space-y-3">
+      <h3 className="text-base font-semibold text-white mb-4">Weather Layers</h3>
+      
       <div className="space-y-2">
-        {LAYERS.map(({ key, icon: Icon, label, color }) => (
-          <button
-            key={key}
-            onClick={() => onToggleFilter(key)}
-            className={`w-full flex items-center justify-between px-4 py-3 rounded-lg transition ${
-              activeFilters[key] 
-                ? 'bg-gray-700 border-2 border-blue-500' 
-                : 'bg-gray-900 border-2 border-gray-700 opacity-60 hover:opacity-100'
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              <Icon className={`w-5 h-5 ${color}`} />
-              <span className="font-medium">{label}</span>
-            </div>
-            {activeFilters[key] ? (
-              <Eye className="w-4 h-4 text-blue-400" />
-            ) : (
-              <EyeOff className="w-4 h-4 text-gray-500" />
-            )}
-          </button>
-        ))}
+        {LAYERS.map((layer) => {
+          const Icon = layer.icon;
+          const isActive = activeFilters[layer.id];
+          
+          return (
+            <button
+              key={layer.id}
+              onClick={() => onToggleFilter(layer.id)}
+              className={`
+                w-full flex items-center gap-3 px-4 py-3 rounded-lg
+                transition-all duration-200
+                ${isActive
+                  ? 'bg-gray-800 border-l-4'
+                  : 'bg-gray-850 hover:bg-gray-800'
+                }
+              `}
+              style={{
+                borderLeftColor: isActive ? layer.color : 'transparent'
+              }}
+            >
+              <div 
+                className={`
+                  p-2 rounded-lg transition-all
+                  ${isActive ? 'bg-opacity-20' : 'bg-gray-800'}
+                `}
+                style={{
+                  backgroundColor: isActive ? `${layer.color}30` : undefined
+                }}
+              >
+                <Icon 
+                  className="w-4 h-4"
+                  style={{ color: isActive ? layer.color : '#9ca3af' }}
+                />
+              </div>
+              
+              <span className={`text-sm font-medium flex-1 text-left ${
+                isActive ? 'text-white' : 'text-gray-400'
+              }`}>
+                {layer.name}
+              </span>
+              
+              <div className={`
+                w-10 h-5 rounded-full transition-all relative
+                ${isActive ? 'bg-blue-500' : 'bg-gray-700'}
+              `}>
+                <div className={`
+                  absolute top-0.5 w-4 h-4 rounded-full bg-white
+                  transition-all duration-200
+                  ${isActive ? 'right-0.5' : 'left-0.5'}
+                `} />
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="mt-4 p-4 bg-gray-900 rounded-lg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Wind className="w-5 h-5 text-cyan-400" />
-            <span className="font-medium">Wind Particles</span>
-          </div>
-          <button
-            onClick={onToggleWindParticles}
-            className={`px-3 py-1 rounded text-sm font-medium transition ${
-              showWindParticles
-                ? 'bg-cyan-600 text-white'
-                : 'bg-gray-700 text-gray-400'
-            }`}
+      {/* Wind Particles Toggle */}
+      <div className="pt-4 border-t border-gray-800">
+        <button
+          onClick={onToggleWindParticles}
+          className={`
+            w-full flex items-center gap-3 px-4 py-3 rounded-lg
+            transition-all duration-200
+            ${showWindParticles
+              ? 'bg-gray-800 border-l-4 border-cyan-400'
+              : 'bg-gray-850 hover:bg-gray-800'
+            }
+          `}
+        >
+          <div 
+            className={`
+              p-2 rounded-lg transition-all
+              ${showWindParticles ? 'bg-cyan-400 bg-opacity-20' : 'bg-gray-800'}
+            `}
           >
-            {showWindParticles ? 'ON' : 'OFF'}
-          </button>
-        </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Animated particles showing wind direction and speed
-        </p>
+            <Eye 
+              className="w-4 h-4"
+              style={{ color: showWindParticles ? '#22d3ee' : '#9ca3af' }}
+            />
+          </div>
+          
+          <span className={`text-sm font-medium flex-1 text-left ${
+            showWindParticles ? 'text-white' : 'text-gray-400'
+          }`}>
+            Wind Particles
+          </span>
+          
+          <div className={`
+            w-10 h-5 rounded-full transition-all relative
+            ${showWindParticles ? 'bg-cyan-500' : 'bg-gray-700'}
+          `}>
+            <div className={`
+              absolute top-0.5 w-4 h-4 rounded-full bg-white
+              transition-all duration-200
+              ${showWindParticles ? 'right-0.5' : 'left-0.5'}
+            `} />
+          </div>
+        </button>
       </div>
     </div>
   );
