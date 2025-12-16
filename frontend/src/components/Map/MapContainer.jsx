@@ -63,7 +63,7 @@ const MapContainer = ({
     }
   }, [country]);
 
-  // Load weather layers as HEATMAP
+  // Load weather layers as HEATMAP + CIRCLES
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -72,9 +72,14 @@ const MapContainer = ({
 
       // Remove previous layers
       layerIds.current.forEach((sourceId) => {
-        const layerId = `${sourceId}-layer`;
-        if (map.current.getLayer(layerId)) {
-          map.current.removeLayer(layerId);
+        const heatmapLayerId = `${sourceId}-layer`;
+        const circleLayerId = `${sourceId}-circle-layer`;
+        
+        if (map.current.getLayer(circleLayerId)) {
+          map.current.removeLayer(circleLayerId);
+        }
+        if (map.current.getLayer(heatmapLayerId)) {
+          map.current.removeLayer(heatmapLayerId);
         }
         if (map.current.getSource(sourceId)) {
           map.current.removeSource(sourceId);
@@ -90,11 +95,13 @@ const MapContainer = ({
       }
 
       for (const [layerName] of activeLayers) {
+        // Map "precipitation" to "rain" for API compatibility
+        const apiLayerName = layerName === 'precipitation' ? 'rain' : layerName;
         const sourceId = `weather-${layerName}`;
-        console.log(`Loading ${layerName} as heatmap...`);
+        console.log(`Loading ${layerName} as heatmap + circles...`);
 
         try {
-          const response = await getGlobalWeatherLayer(layerName);
+          const response = await getGlobalWeatherLayer(apiLayerName);
           const data = response.data;
 
           if (!data || data.length === 0) {
@@ -128,15 +135,15 @@ const MapContainer = ({
               data: geojson
             });
 
-            const layerId = `${sourceId}-layer`;
+            const heatmapLayerId = `${sourceId}-layer`;
+            const circleLayerId = `${sourceId}-circle-layer`;
             
-            // Use HEATMAP layer type for continuous field
+            // Add HEATMAP layer (visible at low zoom)
             map.current.addLayer({
-              id: layerId,
+              id: heatmapLayerId,
               type: "heatmap",
               source: sourceId,
               paint: {
-                // Increase weight as diameter increases (zoom)
                 "heatmap-weight": [
                   "interpolate",
                   ["linear"],
@@ -144,18 +151,15 @@ const MapContainer = ({
                   0, 0,
                   1, 1
                 ],
-                // Increase intensity as zoom level increases
                 "heatmap-intensity": [
                   "interpolate",
                   ["linear"],
                   ["zoom"],
                   0, 0.8,
                   5, 1.2,
-                  10, 1.5
+                  7, 1.5
                 ],
-                // Color ramp for heatmap based on layer type
                 "heatmap-color": getHeatmapColorRamp(layerName),
-                // Adjust radius by zoom level
                 "heatmap-radius": [
                   "interpolate",
                   ["exponential", 2],
@@ -163,22 +167,54 @@ const MapContainer = ({
                   0, 40,
                   3, 50,
                   5, 60,
-                  7, 70,
-                  10, 80
+                  7, 70
                 ],
-                // Transition from heatmap to circle layer by zoom level
+                // Fade out heatmap as we zoom in
                 "heatmap-opacity": [
                   "interpolate",
                   ["linear"],
                   ["zoom"],
                   0, 0.8,
-                  10, 0.7
+                  6, 0.6,
+                  7, 0.3,
+                  8, 0
                 ]
+              }
+            });
+
+            // Add CIRCLE layer (visible at high zoom)
+            map.current.addLayer({
+              id: circleLayerId,
+              type: "circle",
+              source: sourceId,
+              paint: {
+                "circle-radius": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  7, 2,
+                  9, 4,
+                  11, 6,
+                  13, 8
+                ],
+                "circle-color": getCircleColor(layerName),
+                "circle-opacity": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  6, 0,
+                  7, 0.3,
+                  8, 0.7,
+                  9, 0.85
+                ],
+                "circle-stroke-width": 1,
+                "circle-stroke-color": "#ffffff",
+                "circle-stroke-opacity": 0.5
               }
             });
             
             layerIds.current.push(sourceId);
-            console.log(`✓ Rendered ${layerName} as continuous heatmap`);
+            console.log(`✓ Rendered ${layerName} with heatmap + circle layers`);
           }
         } catch (error) {
           console.error(`Failed to load ${layerName}:`, error);
@@ -195,6 +231,7 @@ const MapContainer = ({
     const ranges = {
       temperature: { min: -10, max: 40 },
       rain: { min: 0, max: 100 },
+      precipitation: { min: 0, max: 100 }, // Alias for rain
       wind: { min: 0, max: 45 },
       clouds: { min: 0, max: 100 },
       storm: { min: 0, max: 100 }
@@ -207,6 +244,17 @@ const MapContainer = ({
   const getHeatmapColorRamp = (layerName) => {
     const colorRamps = {
       rain: [
+        "interpolate",
+        ["linear"],
+        ["heatmap-density"],
+        0, "rgba(0, 0, 0, 0)",
+        0.2, "rgba(33, 102, 172, 0.3)",
+        0.4, "rgba(67, 147, 195, 0.5)",
+        0.6, "rgba(146, 197, 222, 0.7)",
+        0.8, "rgba(103, 169, 207, 0.8)",
+        1, "rgba(5, 52, 112, 0.9)"
+      ],
+      precipitation: [ // Alias for rain
         "interpolate",
         ["linear"],
         ["heatmap-density"],
@@ -262,6 +310,67 @@ const MapContainer = ({
     };
 
     return colorRamps[layerName] || colorRamps.temperature;
+  };
+
+  const getCircleColor = (layerName) => {
+    // Color based on the normalized weight property
+    const colorSchemes = {
+      rain: [
+        "interpolate",
+        ["linear"],
+        ["get", "weight"],
+        0, "#e0f3ff",
+        0.3, "#4393c3",
+        0.6, "#2166ac",
+        1, "#053470"
+      ],
+      precipitation: [ // Alias for rain
+        "interpolate",
+        ["linear"],
+        ["get", "weight"],
+        0, "#e0f3ff",
+        0.3, "#4393c3",
+        0.6, "#2166ac",
+        1, "#053470"
+      ],
+      wind: [
+        "interpolate",
+        ["linear"],
+        ["get", "weight"],
+        0, "#ffffb2",
+        0.3, "#fecc5c",
+        0.6, "#fd8d3c",
+        1, "#bd0026"
+      ],
+      temperature: [
+        "interpolate",
+        ["linear"],
+        ["get", "weight"],
+        0, "#4575b4",
+        0.3, "#74add1",
+        0.5, "#fee090",
+        0.7, "#f46d43",
+        1, "#d73027"
+      ],
+      clouds: [
+        "interpolate",
+        ["linear"],
+        ["get", "weight"],
+        0, "#f7f7f7",
+        0.5, "#cccccc",
+        1, "#525252"
+      ],
+      storm: [
+        "interpolate",
+        ["linear"],
+        ["get", "weight"],
+        0, "#9e0142",
+        0.5, "#d53e4f",
+        1, "#fee08b"
+      ]
+    };
+
+    return colorSchemes[layerName] || colorSchemes.temperature;
   };
 
   return (
