@@ -12,10 +12,7 @@ class WeatherService {
     this.openWeatherBaseUrl = 'https://api.openweathermap.org/data/2.5';
   }
 
-  /**
-   * Fetch REAL global weather data from OpenWeatherMap
-   * This fetches actual current weather for a grid of points
-   */
+ 
   async fetchGlobalWeatherData(layer) {
     const cacheKey = `global_${layer}`;
     const cached = cache.get(cacheKey);
@@ -48,7 +45,7 @@ class WeatherService {
         }
       }
 
-      // Execute all requests in parallel (be careful with rate limits!)
+     
       const results = await Promise.allSettled(requests);
 
       results.forEach((result, idx) => {
