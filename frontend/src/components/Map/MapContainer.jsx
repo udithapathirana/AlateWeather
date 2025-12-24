@@ -70,7 +70,6 @@ const MapContainer = ({
     const loadLayers = async () => {
       console.log('Loading heatmap layers...');
 
-      // Remove previous layers
       layerIds.current.forEach((sourceId) => {
         const heatmapLayerId = `${sourceId}-layer`;
         const circleLayerId = `${sourceId}-circle-layer`;
@@ -182,7 +181,7 @@ const MapContainer = ({
               }
             });
 
-            // Add CIRCLE layer (visible at high zoom)
+         
             map.current.addLayer({
               id: circleLayerId,
               type: "circle",
@@ -313,7 +312,7 @@ const MapContainer = ({
   };
 
   const getCircleColor = (layerName) => {
-    // Color based on the normalized weight property
+   
     const colorSchemes = {
       rain: [
         "interpolate",
