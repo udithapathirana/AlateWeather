@@ -70,6 +70,7 @@ const MapContainer = ({
     const loadLayers = async () => {
       console.log('Loading heatmap layers...');
 
+
       layerIds.current.forEach((sourceId) => {
         const heatmapLayerId = `${sourceId}-layer`;
         const circleLayerId = `${sourceId}-circle-layer`;

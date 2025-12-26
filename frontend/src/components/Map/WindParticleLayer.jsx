@@ -1,4 +1,4 @@
-// frontend/src/components/Map/WindParticleLayer.jsx
+
 import { useEffect, useRef } from "react";
 import { getGlobalWindField } from '../../services/api';
 
@@ -10,7 +10,7 @@ const WindParticleLayer = ({ map, enabled = true }) => {
   const initializedRef = useRef(false);
   const lastFetchRef = useRef(0);
 
-  // Initialize wind field and particles
+  
   useEffect(() => {
     if (!map || initializedRef.current) return;
     
@@ -34,7 +34,7 @@ const WindParticleLayer = ({ map, enabled = true }) => {
 
     const ctx = canvas.getContext("2d", { alpha: true });
 
-    // Resize handler
+  
     const handleResize = () => {
       const rect = container.getBoundingClientRect();
       canvas.width = rect.width;
